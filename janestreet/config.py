@@ -43,7 +43,7 @@ PATHS_DATA = {
 WANDB_PROJECT = "kaggle_janestreet"
 
 # Kaggle (to push code and models, not required)
-KAGGLE_USERNAME = "eivolkova"
+KAGGLE_USERNAME = "frederikwolff"
 
 # Default random seed
 RANDOM_SEED = 42
