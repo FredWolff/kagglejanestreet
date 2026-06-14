@@ -8,7 +8,7 @@ from janestreet.models.nn import NN
 from janestreet.data_processor import DataProcessor
 from janestreet.tracker import WandbTracker
 
-TRACK = False
+TRACK = True
 
 MODEL_NAME = "ensemble"
 COMMENT = ""

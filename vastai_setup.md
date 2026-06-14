@@ -10,7 +10,7 @@
 ## 2. Clone the Repository
 
 ```bash
-git clone https://github.com/FredWolff/kagglejanestreet.git /home/janestreet2024
+git clone https://GITHUB_TOKEN@github.com/FredWolff/kagglejanestreet.git /home/janestreet2024
 cd /home/janestreet2024
 ```
 
