@@ -8,7 +8,7 @@ from janestreet.data_processor import DataProcessor
 from janestreet.tracker import WandbTracker
 from janestreet.transformers import PolarsTransformer
 
-TRACK = False
+TRACK = True
 COMMENT = ""
 CATEGORY = "model_ver27_ts"
 
