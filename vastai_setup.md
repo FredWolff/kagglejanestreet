@@ -42,7 +42,20 @@ Note: You must have accepted the competition rules at
 `kaggle.com/competitions/jane-street-real-time-market-data-forecasting`
 before the download will work.
 
-## 6. Run Training
+## 6. Test Wandb Connection
+
+```bash
+python -c "
+from dotenv import load_dotenv
+import os
+load_dotenv()
+import wandb
+result = wandb.login(key=os.environ.get('WANDB_TOKEN'))
+print('Login successful:', result)
+"
+```
+
+## 7. Run Training
 
 Cross-validation:
 ```bash
