@@ -57,7 +57,9 @@ class DataProcessor:
         self,
         name: str,
         skip_days: int = None,
-        transformer: PolarsTransformer | None = None
+        transformer: PolarsTransformer | None = None,
+        cols_features_corr: list[str] | None = None,
+        T: int | None = T,
     ):
         """Initializes the DataProcessor.
 
@@ -66,17 +68,28 @@ class DataProcessor:
             skip_days (int, optional): Number of days to skip when loading data. Defaults to None.
             transformer (PolarsTransformer, optional): Transformer for data preprocessing.
                                                        Defaults to None.
+            cols_features_corr (list[str], optional): Feature columns to build rolling/market-average
+                                                       variations for. Defaults to `COLS_FEATURES_CORR`.
+            T (int, optional): Window size for rolling computations. Defaults to the class `T`.
         """
         self.name = name
         self.skip_days = skip_days
         self.transformer = transformer
+        self.cols_features_corr = (
+            list(cols_features_corr) if cols_features_corr is not None else list(self.COLS_FEATURES_CORR)
+        )
+        self.T = T
 
         self.features = list(self.COLS_FEATURES_INIT)
-        self.features += [f"{i}_diff_rolling_avg_{self.T}" for i in self.COLS_FEATURES_CORR]
-        self.features += [f"{i}_rolling_std_{self.T}" for i in self.COLS_FEATURES_CORR]
-        self.features += [f"{i}_avg_per_date_time" for i in self.COLS_FEATURES_CORR]
+        self.features += [f"{i}_diff_rolling_avg_{self.T}" for i in self.cols_features_corr]
+        self.features += [f"{i}_rolling_std_{self.T}" for i in self.cols_features_corr]
+        self.features += [f"{i}_avg_per_date_time" for i in self.cols_features_corr]
         self.features += ["feature_time_id"]
         self.features = [i for i in self.features if i not in self.COLS_FEATURES_CAT]
+
+        # Set by janestreet.feature_testing when cols_features_corr was picked by a
+        # FeatureAnalysis ranking; the ranking table (columns + scores), for logging.
+        self.feature_ranking_: pl.DataFrame | None = None
 
         utils.create_folder(self.PATH)
 
@@ -183,14 +196,14 @@ class DataProcessor:
         """
         df = self._get_window_average_std(
             df,
-            self.COLS_FEATURES_CORR,
+            self.cols_features_corr,
             n=self.T,
             fast=fast,
             date_id=date_id,
             time_id=time_id,
             symbols=symbols
         )
-        df = self._get_market_average(df, self.COLS_FEATURES_CORR, fast=fast)
+        df = self._get_market_average(df, self.cols_features_corr, fast=fast)
 
         df = df.with_columns(
             pl.col("time_id").alias("feature_time_id"),

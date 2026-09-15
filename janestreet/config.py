@@ -1,34 +1,46 @@
 """Configuration file."""
 
 import os
+import platform
 from pathlib import Path
 
 # Determine the execution environment based on environment variables
 KAGGLE = 'KAGGLE_URL_BASE' in os.environ
-VASTAI = not KAGGLE
+WINDOWS = not KAGGLE and platform.system() == "Windows"
+VASTAI = not KAGGLE and not WINDOWS
 
 # Define base paths for different environments (change if needed)
 # Data and models can be stored on a different volume
-# Path with data should contain subdirectoriy "data" 
+# Path with data should contain subdirectoriy "data"
 # with data from https://www.kaggle.com/competitions/jane-street-real-time-market-data-forecasting/data
 base_paths = {
     "VASTAI": Path("/home/janestreet2024"),
     "VASTAI_DATA": Path("/workspace/kaggle/janestreet"),
     "KAGGLE": Path("/kaggle/input"),
+    "WINDOWS": Path(__file__).resolve().parent.parent,
 }
 
 # Set paths based on the environment (change if needed)
-if VASTAI:
+if WINDOWS:
+    base_path = base_paths["WINDOWS"]
+    base_path_data = base_paths["WINDOWS"]
+    PATH_DATA = base_path_data / "data"
+    PATH_MODELS = base_path_data / "models"
+    PATH_FEATURE_SETS = base_path_data / "feature_sets"
+    PATH_CODE = base_path / "dist/janestreet-0.1-py3-none-any.whl"
+elif VASTAI:
     base_path = base_paths["VASTAI"]
     base_path_data = base_paths["VASTAI_DATA"]
     PATH_DATA = base_path_data / "data"
     PATH_MODELS = base_path_data / "models"
+    PATH_FEATURE_SETS = base_path_data / "feature_sets"
     PATH_CODE = base_path / "dist/janestreet-0.1-py3-none-any.whl"
 elif KAGGLE:
     base_path = base_paths["KAGGLE"]
     base_path_data = base_paths["KAGGLE"]
     PATH_DATA = base_path / "jane-street-real-time-market-data-forecasting"
     PATH_MODELS = base_path / "janestreet2025-models"
+    PATH_FEATURE_SETS = base_path / "janestreet2025-feature-sets"
     PATH_CODE = base_path / "janestreet2025-code/janestreet-0.1-py3-none-any.whl"
 else:
     raise ValueError("Unknown environment")
