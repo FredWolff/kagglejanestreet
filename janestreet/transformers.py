@@ -84,8 +84,10 @@ class PolarsTransformer:
 
         if self.scale:
             df = df.with_columns([
-                ((pl.col(column) - self.statistics_mean_std[column]["mean"]) /
-                self.statistics_mean_std[column]["std"])
+                ((pl.col(column) - (self.statistics_mean_std[column]["mean"] or 0.0)) /
+                # A zero/null std means the column is (near-)constant; falling back to 1.0
+                # avoids dividing by ~0, which would blow up to inf/NaN downstream.
+                (self.statistics_mean_std[column]["std"] or 1.0))
                 for column in self.features
             ])
 
@@ -137,8 +139,8 @@ class PolarsTransformer:
 
         if self.scale:
             df = df.with_columns([
-                ((pl.col(column) - self.statistics_mean_std[column]["mean"]) /
-                    self.statistics_mean_std[column]["std"])
+                ((pl.col(column) - (self.statistics_mean_std[column]["mean"] or 0.0)) /
+                    (self.statistics_mean_std[column]["std"] or 1.0))
                 for column in self.features
             ])
 
