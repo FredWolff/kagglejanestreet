@@ -1,13 +1,16 @@
 """Feature analysis tool for assessing predictive power against a target column.
 """
 
+import inspect
 import json
 from pathlib import Path
 
 import pandas as pd
 import polars as pl
+import autofeat.autofeat as _autofeat_module
 from autofeat import AutoFeatRegressor
 from sklearn.feature_selection import mutual_info_regression
+from sklearn.utils import check_array as _sklearn_check_array
 
 from .config import PATH_FEATURE_SETS
 
@@ -346,6 +349,8 @@ class FeatureAnalysis:
         n_jobs: int = 1,
         verbose: int = 0,
         full_transform: bool = True,
+        sample_size: int | None = 200_000,
+        random_state: int = 0,
     ) -> pl.DataFrame:
         """Builds composite features from the top-ranked features using autofeat.
 
@@ -356,6 +361,15 @@ class FeatureAnalysis:
         fit against the target. autofeat's search is combinatorial in the
         number of input features, so keep `n_features` small (autofeat itself
         warns for input counts much above 100).
+
+        autofeat's search materializes one dense array per combination step,
+        shaped (n_fit_rows, n_candidate_columns) - with n_features=50 and
+        feateng_steps=2 this is already tens of thousands of candidate columns,
+        so fitting on more than a few hundred thousand rows risks exhausting
+        memory well before it buys any real gain in the search's statistical
+        stability (row subsampling only affects which rows autofeat's search
+        sees; `full_transform` still applies the surviving formulas to every
+        row of `self.df` afterward).
 
         Rows with a null in any selected feature or the target are dropped,
         since autofeat requires finite values.
@@ -374,25 +388,34 @@ class FeatureAnalysis:
                 selection. Defaults to 1.
             verbose (int, optional): autofeat verbosity level. Defaults to 0.
             full_transform (bool, optional): If True (default), fit autofeat on
-                the null-dropped rows as usual, but then apply the fitted model
-                to every row of `self.df` (via `AutoFeatRegressor.transform`),
-                so the returned frame has the same row count and order as
-                `self.df` (nulls in the inputs propagate to nulls in the
-                composite features, rather than dropping the row). This is what
-                lets the result be concatenated back onto `self.df` column-wise.
-                If False, only the null-dropped rows used for fitting are
-                returned, as in earlier versions of this method.
+                the (sampled, null-dropped) rows as usual, but then apply the
+                fitted model to every row of `self.df` (via
+                `AutoFeatRegressor.transform`), so the returned frame has the
+                same row count and order as `self.df` (nulls in the inputs
+                propagate to nulls in the composite features, rather than
+                dropping the row). This is what lets the result be
+                concatenated back onto `self.df` column-wise. If False, only
+                the rows used for fitting are returned, as in earlier
+                versions of this method.
+            sample_size (int, optional): Number of null-dropped rows to
+                subsample (without replacement) before fitting autofeat, same
+                purpose as `mutual_information`'s `sample_size`. Defaults to
+                200_000. Pass None to fit on every null-dropped row (only
+                advisable for small datasets - see the memory note above).
+            random_state (int, optional): Random seed for the row subsample.
+                Defaults to 0.
 
         Returns:
             pl.DataFrame: The newly engineered composite feature columns (not
                 the original inputs). One row per row of `self.df` if
                 `full_transform` is True, else one row per row kept after
-                dropping nulls. Column names are the symbolic expressions
-                autofeat generated (e.g. "x1*x2"), so they double as a
-                description of each feature. The formulas are also stored,
-                keyed by column name, in `self.composite_feature_formulas_`.
-                The fitted model is stored in `self.autofeat_model_` and its
-                input feature names in `self.autofeat_input_features_`.
+                dropping nulls and subsampling. Column names are the symbolic
+                expressions autofeat generated (e.g. "x1*x2"), so they double
+                as a description of each feature. The formulas are also
+                stored, keyed by column name, in
+                `self.composite_feature_formulas_`. The fitted model is
+                stored in `self.autofeat_model_` and its input feature names
+                in `self.autofeat_input_features_`.
         """
         rankings = {
             "correlation": self.correlation,
@@ -405,6 +428,8 @@ class FeatureAnalysis:
 
         top_features = rankings[by]()["column"].head(n_features).to_list()
         fit_data = self.df.select(top_features + [self.target]).drop_nulls()
+        if sample_size is not None and fit_data.height > sample_size:
+            fit_data = fit_data.sample(n=sample_size, seed=random_state)
 
         x_fit = fit_data.select(top_features).to_pandas()
         y_fit = fit_data[self.target].to_pandas()
@@ -413,6 +438,18 @@ class FeatureAnalysis:
         # no longer defines it, so restore a compatible shim for this call.
         if not hasattr(pd.Series, "ravel"):
             pd.Series.ravel = lambda self: self.to_numpy().ravel()
+
+        # autofeat 2.1.1's AutoFeatRegressor.transform() calls check_array
+        # with the since-renamed force_all_finite kwarg; newer sklearn only
+        # accepts ensure_all_finite, so shim the module-level name autofeat
+        # itself calls (not sklearn's check_array globally).
+        if "force_all_finite" not in inspect.signature(_sklearn_check_array).parameters:
+            def _check_array_compat(*args, force_all_finite=None, **kwargs):
+                if force_all_finite is not None:
+                    kwargs.setdefault("ensure_all_finite", force_all_finite)
+                return _sklearn_check_array(*args, **kwargs)
+
+            _autofeat_module.check_array = _check_array_compat
 
         model = AutoFeatRegressor(
             feateng_steps=feateng_steps,

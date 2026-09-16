@@ -145,6 +145,26 @@ class FullPipeline:
             resp_valid = df_valid.select(self.responders).to_numpy()
             y_valid = df_valid.select(self.col_target).to_series().to_numpy()
 
+            if verbose:
+                # A near-zero std means PolarsTransformer's (x-mean)/std scaling divides by
+                # ~0, producing inf/huge values that can push the network to NaN outputs -
+                # flag it here, before that happens, rather than only seeing a NaN score later.
+                stats_mean_std = getattr(self.preprocessor, "statistics_mean_std", None) or {}
+                zero_std = [col for col, stats in stats_mean_std.items() if not stats["std"]]
+                if zero_std:
+                    print(f"[{self.run_name}] WARNING: zero/undefined std features "
+                          f"(scaling divides by ~0): {zero_std}")
+
+                n_nan_train, n_inf_train = np.isnan(X_train).sum(), np.isinf(X_train).sum()
+                n_nan_valid, n_inf_valid = np.isnan(X_valid).sum(), np.isinf(X_valid).sum()
+                if n_nan_train or n_inf_train or n_nan_valid or n_inf_valid:
+                    print(f"[{self.run_name}] WARNING: non-finite values after scaling - "
+                          f"train nan={n_nan_train} inf={n_inf_train}, "
+                          f"valid nan={n_nan_valid} inf={n_inf_valid}")
+                print(f"[{self.run_name}] scaled feature magnitude: "
+                      f"max|X_train|={np.nanmax(np.abs(X_train)):.3g}, "
+                      f"max|X_valid|={np.nanmax(np.abs(X_valid)):.3g}")
+
             train_set = (
                 X_train,
                 resp_train,

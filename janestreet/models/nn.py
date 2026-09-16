@@ -503,6 +503,9 @@ class NN:
                     f"{epoch+1:^5} | {train_loss:^10.4f} | {val_loss:^8.4f} | "
                     f"{train_r2:^9.4f} | {val_r2:^7.4f} | {lr_last:^7.5f}"
                 )
+                if np.isnan(train_loss) or np.isnan(val_loss):
+                    print(f"!!! NaN LOSS DETECTED at epoch {epoch+1} "
+                          f"(train_loss={train_loss}, val_loss={val_loss}) !!!")
 
             if val_r2 > min_val_r2:
                 min_val_r2 = val_r2

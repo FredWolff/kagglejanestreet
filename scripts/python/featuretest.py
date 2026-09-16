@@ -72,7 +72,7 @@ tests2 = {
     9: "mutual_information",
 }
 
-for SIM in range(10):
+for SIM in range(4, 10):
     if SIM < 5:
         prefix = "develop16"
         method = tests1[SIM]
@@ -124,6 +124,14 @@ for SIM in range(10):
         wandb_tracker.init_run(features)
         if data_processor.feature_ranking_ is not None:
             wandb_tracker.save_data(data_processor.feature_ranking_.to_pandas(), name="feature_ranking")
+
+        # Per-feature null rate / mean / std / min / max on the full training frame, so a
+        # constant or heavily-null feature (which can blow up PolarsTransformer's (x-mean)/std
+        # scaling into inf/NaN) is visible before training even starts.
+        feature_stats = df.select(features).describe().to_pandas().set_index("statistic").T
+        feature_stats.index.name = "feature"
+        feature_stats = feature_stats.reset_index()
+        wandb_tracker.save_data(feature_stats, name="feature_stats")
 
     cv = PipelineCV(pipeline, wandb_tracker, n_splits=N_SPLITS, train_size=TRAIN_SIZE)
     scores = cv.fit(df, verbose=True)

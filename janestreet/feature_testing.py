@@ -112,6 +112,7 @@ def build_tests2_processor(
     autofeat_n_input: int = 50,
     autofeat_by: str = "correlation",
     autofeat_feateng_steps: int = 2,
+    autofeat_sample_size: int = 200_000,
 ) -> tuple[DataProcessor, pl.DataFrame]:
     """Builds the DataProcessor + df for a tests2 SIM (5: autofeat, 6-9: ranked).
 
@@ -141,6 +142,11 @@ def build_tests2_processor(
             autofeat's input features. Defaults to "mutual_information".
         autofeat_feateng_steps (int, optional): Passed through to
             `FeatureAnalysis.build_composite_features`. Defaults to 2.
+        autofeat_sample_size (int, optional): Rows to subsample before
+            fitting autofeat (see `FeatureAnalysis.build_composite_features`'s
+            `sample_size` - without this, autofeat's combinatorial search
+            over tens of millions of rows exhausts memory). Defaults to
+            200_000.
 
     Returns:
         tuple[DataProcessor, pl.DataFrame]: The configured DataProcessor
@@ -162,6 +168,7 @@ def build_tests2_processor(
             by=autofeat_by,
             feateng_steps=autofeat_feateng_steps,
             full_transform=True,
+            sample_size=autofeat_sample_size,
         )
         df = pl.concat([df, composite], how="horizontal")
 
@@ -181,6 +188,7 @@ def build_tests2_processor(
             by=autofeat_by,
             feateng_steps=autofeat_feateng_steps,
             full_transform=True,
+            sample_size=autofeat_sample_size,
         )
         df = pl.concat([df, composite], how="horizontal")
 
