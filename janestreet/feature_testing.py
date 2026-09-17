@@ -151,15 +151,18 @@ def build_tests2_processor(
     autofeat_by: str = "correlation",
     autofeat_feateng_steps: int = 2,
     autofeat_sample_size: int = 200_000,
+    include_autofeat: bool = False,
 ) -> tuple[DataProcessor, pl.DataFrame]:
     """Builds the DataProcessor + df for a tests2 SIM (5: autofeat, 6-9: ranked).
 
     SIM 5 ("autofeat") builds a pool made purely of autofeat composite
-    features (from the raw features) and ranks it by correlation.
+    features (from the raw features) and ranks it by correlation. This is
+    unaffected by `include_autofeat` - it's the whole point of that SIM.
 
     SIM 6-9 build a pool of rolling/market-average variations of every raw
-    feature plus autofeat composite features, and rank that combined pool by
-    the given method.
+    feature and rank that pool by the given method. If `include_autofeat` is
+    True, autofeat composite features (from the raw features) are appended
+    to the pool before ranking too.
 
     In both cases the final feature list is the 79 raw features plus the top
     `n_select` ranked columns from the pool.
@@ -185,11 +188,19 @@ def build_tests2_processor(
             `sample_size` - without this, autofeat's combinatorial search
             over tens of millions of rows exhausts memory). Defaults to
             200_000.
+        include_autofeat (bool, optional): For SIM 6-9 only (method !=
+            "autofeat"), whether to also build autofeat composite features
+            and add them to the ranked pool. Off by default: turned off to
+            cut memory pressure in tests2, since fitting autofeat and holding
+            its composite columns is expensive on top of the ~228-column
+            rolling/market-average pool already being ranked. Set True to
+            restore the previous behavior.
 
     Returns:
         tuple[DataProcessor, pl.DataFrame]: The configured DataProcessor
             (with `.features` set) and its training dataframe (raw features,
-            all rolling/market-average variations, and autofeat composites).
+            all rolling/market-average variations, and - if `include_autofeat`
+            or `method == "autofeat"` - autofeat composites).
     """
     exclude = _default_exclude(target) + ["feature_time_id"] + DataProcessor.COLS_FEATURES_CAT
 
@@ -217,18 +228,19 @@ def build_tests2_processor(
         )
         df = dp.get_train_data()
 
-        fa_auto = FeatureAnalysis(
-            df.select(CANDIDATE_FEATURES_INIT + [target]),
-            target=target,
-        )
-        composite = fa_auto.build_composite_features(
-            n_features=autofeat_n_input,
-            by=autofeat_by,
-            feateng_steps=autofeat_feateng_steps,
-            full_transform=True,
-            sample_size=autofeat_sample_size,
-        )
-        df = pl.concat([df, composite], how="horizontal")
+        if include_autofeat:
+            fa_auto = FeatureAnalysis(
+                df.select(CANDIDATE_FEATURES_INIT + [target]),
+                target=target,
+            )
+            composite = fa_auto.build_composite_features(
+                n_features=autofeat_n_input,
+                by=autofeat_by,
+                feateng_steps=autofeat_feateng_steps,
+                full_transform=True,
+                sample_size=autofeat_sample_size,
+            )
+            df = pl.concat([df, composite], how="horizontal")
 
         candidate_cols = [
             c for c in df.columns
