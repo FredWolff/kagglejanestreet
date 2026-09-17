@@ -8,6 +8,11 @@ subset instead.
 tests2 (SIM 5-9): build a much larger candidate pool - rolling/market-average
 variations of every raw feature, plus autofeat composite features - then rank
 that pool and keep the top 125 columns.
+
+Both tests skip any ranked candidate whose derived column(s) can't actually be
+normalized (zero/null std - see PolarsTransformer and pipeline.py's zero-std
+warning), taking the next-best-ranked candidate instead. See
+_select_normalizable.
 """
 
 import polars as pl
@@ -64,6 +69,29 @@ def _finalize_features(top: list[str]) -> list[str]:
     return features
 
 
+def _select_normalizable(
+    df: pl.DataFrame,
+    ranking: pl.DataFrame,
+    n_select: int,
+    derived_cols=lambda col: [col],
+) -> list[str]:
+    """Walks `ranking`'s columns best-first, keeping a candidate only if every
+    column `derived_cols(candidate)` names has nonzero, non-null std in `df`.
+
+    A zero/null std means PolarsTransformer's (x-mean)/std scaling divides by
+    ~0 (see pipeline.py's zero-std warning), so a feature like that can't
+    actually be normalized - skip it and take the next-best-ranked candidate
+    instead, rather than keeping an unusable column.
+    """
+    selected = []
+    for col in ranking["column"].to_list():
+        if len(selected) >= n_select:
+            break
+        if all(df[c].std() for c in derived_cols(col)):
+            selected.append(col)
+    return selected
+
+
 def build_tests1_processor(
     method: str,
     name: str,
@@ -92,11 +120,21 @@ def build_tests1_processor(
         dp.feature_ranking_ = None
         return dp, dp.get_train_data()
 
-    scout = DataProcessor(f"{name}_scout", skip_days=skip_days, cols_features_corr=[])
+    # cols_features_corr=CANDIDATE_FEATURES_INIT (rather than []) so the scout df already
+    # has every raw feature's derived variants, letting _select_normalizable check them
+    # below without a second, per-candidate data load.
+    scout = DataProcessor(f"{name}_scout", skip_days=skip_days, cols_features_corr=CANDIDATE_FEATURES_INIT)
     scout_df = scout.get_train_data()
 
     ranking = _rank(scout_df, method, target, candidate_cols=CANDIDATE_FEATURES_INIT)
-    top = ranking["column"].head(n_select).to_list()
+    top = _select_normalizable(
+        scout_df, ranking, n_select,
+        derived_cols=lambda col: [
+            f"{col}_diff_rolling_avg_{scout.T}",
+            f"{col}_rolling_std_{scout.T}",
+            f"{col}_avg_per_date_time",
+        ],
+    )
 
     dp = DataProcessor(name, skip_days=skip_days, cols_features_corr=top)
     dp.feature_ranking_ = ranking
@@ -198,7 +236,7 @@ def build_tests2_processor(
         ]
         ranking = _rank(df, method, target, candidate_cols=candidate_cols)
 
-    top = ranking["column"].head(n_select).to_list()
+    top = _select_normalizable(df, ranking, n_select)
 
     dp.name = name
     dp.features = _finalize_features(top)
