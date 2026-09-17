@@ -72,7 +72,7 @@ tests2 = {
     9: "mutual_information",
 }
 
-for SIM in range(4, 10):
+for SIM in range(6, 10):
     if SIM < 5:
         prefix = "develop16"
         method = tests1[SIM]
