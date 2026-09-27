@@ -53,6 +53,10 @@ class DataProcessor:
 
     T = 1000
 
+    # Lag windows, in time steps (rows in a symbol's own chronological sequence) -
+    # not calendar days. See _get_lags.
+    LAGS = [7, 14, 28, 56]
+
     def __init__(
         self,
         name: str,
@@ -60,6 +64,8 @@ class DataProcessor:
         transformer: PolarsTransformer | None = None,
         cols_features_corr: list[str] | None = None,
         T: int | None = T,
+        cols_lags: list[str] | None = None,
+        lags: list[int] | None = None,
     ):
         """Initializes the DataProcessor.
 
@@ -71,6 +77,14 @@ class DataProcessor:
             cols_features_corr (list[str], optional): Feature columns to build rolling/market-average
                                                        variations for. Defaults to `COLS_FEATURES_CORR`.
             T (int, optional): Window size for rolling computations. Defaults to the class `T`.
+            cols_lags (list[str], optional): Feature columns to build lagged (backward-only,
+                                              per-symbol) variations for. Defaults to None (no lag
+                                              columns are built). Applied only in `get_train_data` -
+                                              not `process_test_data`, since a per-symbol lag needs
+                                              that symbol's historical rows, which the single-step
+                                              inference path doesn't have. See `_get_lags`.
+            lags (list[int], optional): Lag windows, in time steps, used when `cols_lags` is set.
+                                         Defaults to `self.LAGS`.
         """
         self.name = name
         self.skip_days = skip_days
@@ -79,12 +93,15 @@ class DataProcessor:
             list(cols_features_corr) if cols_features_corr is not None else list(self.COLS_FEATURES_CORR)
         )
         self.T = T
+        self.cols_lags = list(cols_lags) if cols_lags is not None else []
+        self.lags = list(lags) if lags is not None else list(self.LAGS)
 
         self.features = list(self.COLS_FEATURES_INIT)
         self.features += [f"{i}_diff_rolling_avg_{self.T}" for i in self.cols_features_corr]
         self.features += [f"{i}_rolling_std_{self.T}" for i in self.cols_features_corr]
         self.features += [f"{i}_avg_per_date_time" for i in self.cols_features_corr]
         self.features += ["feature_time_id"]
+        self.features += [f"{c}_lag_{n}" for c in self.cols_lags for n in self.lags]
         self.features = [i for i in self.features if i not in self.COLS_FEATURES_CAT]
 
         # Set by janestreet.feature_testing when cols_features_corr was picked by a
@@ -117,6 +134,9 @@ class DataProcessor:
 
         df = self._add_features(df)
 
+        if self.cols_lags:
+            df = self._get_lags(df, self.cols_lags, lags=self.lags)
+
         if self.transformer is not None:
             self.transformer.set_features(self.features)
             df = self.transformer.fit_transform(df)
@@ -145,6 +165,18 @@ class DataProcessor:
             pl.DataFrame: Processed test data.
         """
         df = self._add_features(df, fast=fast, date_id=date_id, time_id=time_id, symbols=symbols)
+
+        lag_features = [f for f in self.features if "_lag_" in f]
+        if lag_features:
+            raise NotImplementedError(
+                "process_test_data cannot compute lagged features "
+                f"(e.g. {lag_features[:3]}) - a per-symbol lag needs that "
+                "symbol's historical rows, which this single-step inference "
+                "path doesn't have. A DataProcessor whose .features includes "
+                "lag columns (e.g. from build_tests3_processor) is for "
+                "ranking/training experiments only, not submission."
+            )
+
         if self.transformer is not None:
             df = self.transformer.transform(df, refit=True)
         return df
@@ -300,4 +332,45 @@ class DataProcessor:
                 .alias(f"{col}_avg_per_date_time")
                 for col in cols
             ])
+        return df
+
+    def _get_lags(
+        self,
+        df: pl.DataFrame,
+        cols: list,
+        lags: list[int] | None = None,
+    ) -> pl.DataFrame:
+        """Computes lagged (backward-looking only) versions of columns.
+
+        Lags are in time steps - rows in a symbol's own chronological
+        sequence, following the existing (date_id, time_id) row order - not
+        calendar days. A positive shift pulls a value from an earlier row;
+        this must never be negative (a negative shift would pull from a
+        later row, leaking future information - the opposite convention
+        from get_train_data's responder_9/responder_10 construction, which
+        deliberately uses negative shifts to build forward-looking labels).
+
+        Like the existing rolling mean/std computation, this does not treat
+        gaps in a symbol's date coverage specially: shifting is purely by
+        row position within that symbol's present data, so a lag whose
+        window crosses one of those gaps will reach further back in real
+        calendar time than the lag value implies. Every symbol in this
+        dataset has such gaps, so this is a real, accepted characteristic,
+        not a rare edge case.
+
+        Args:
+            df (pl.DataFrame): DataFrame to process.
+            cols (list): List of columns for which to compute lags.
+            lags (list[int], optional): Lag values, in time steps. Defaults
+                to `self.LAGS`.
+
+        Returns:
+            pl.DataFrame: DataFrame with `{col}_lag_{lag}` columns added.
+        """
+        lags = lags if lags is not None else self.LAGS
+        df = df.with_columns([
+            pl.col(col).shift(lag).over(["symbol_id"]).alias(f"{col}_lag_{lag}")
+            for col in cols
+            for lag in lags
+        ])
         return df

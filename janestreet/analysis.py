@@ -13,6 +13,7 @@ from sklearn.feature_selection import mutual_info_regression
 from sklearn.utils import check_array as _sklearn_check_array
 
 from .config import PATH_FEATURE_SETS
+from .transformers import PolarsTransformer
 
 
 class FeatureAnalysis:
@@ -23,12 +24,21 @@ class FeatureAnalysis:
     together, keyed by metric name.
 
     Attributes:
-        df (pl.DataFrame): Dataset to analyze.
+        df (pl.DataFrame): Dataset to analyze, with `features` mean/std-normalized
+            (see `transformer`). `correlation`, `rolling_correlation`,
+            `information_transfer`, and `mutual_information` are unaffected by this
+            (each is invariant to independent affine rescaling of a feature), but
+            `build_composite_features` (autofeat) is not, since it builds nonlinear
+            combinations of the raw magnitudes.
         target (str): Target column the features are analyzed against.
         group_by (str or None): Column defining independent series (e.g. symbol_id)
             so that rolling metrics don't mix unrelated series.
         features (list[str]): Feature columns considered by the analysis, i.e. all
             columns of `df` except the target, `group_by`, and `exclude`.
+        transformer (PolarsTransformer): Fitted on `features` at construction time.
+            Holds each feature's mean/std (`transformer.statistics_mean_std[col]`),
+            so a normalized value can be converted back to its raw value
+            (`raw = normalized * std + mean`) without keeping a raw copy of `df`.
     """
 
     ROLLING_WINDOW = 10000
@@ -52,7 +62,6 @@ class FeatureAnalysis:
                 Excluded from `features` and left out of the analysis if None.
                 Defaults to "symbol_id".
         """
-        self.df = df
         self.target = target
         self.group_by = group_by
 
@@ -60,6 +69,19 @@ class FeatureAnalysis:
         if group_by is not None:
             excluded.add(group_by)
         self.features = [c for c in df.columns if c not in excluded]
+
+        # Normalize before any ranking method runs. clip_time=False: `df` here is
+        # typically a column subset that never includes feature_time_id (see
+        # feature_testing.py), so PolarsTransformer's default clip step would raise
+        # a column-not-found error. fillnull=False: keep nulls as nulls rather than
+        # backfilling to 0 before scaling - correlation() relies on a null anywhere
+        # in a column producing a NaN Pearson r (its signal to drop that feature),
+        # and mutual_information() does its own explicit per-feature drop_nulls;
+        # backfilling first would silently defeat both.
+        self.transformer = PolarsTransformer(
+            features=self.features, clip_time=False, fillnull=False,
+        )
+        self.df = self.transformer.fit_transform(df)
 
     def correlation(self) -> pl.DataFrame:
         """Computes the correlation of each feature with the target.
@@ -80,6 +102,23 @@ class FeatureAnalysis:
             .sort("abs_correlation", descending=True)
         )
         return result
+
+    def _rolling_corr_frame(self, window_size: int) -> pl.DataFrame:
+        """Rolling correlation of every feature with the target, one column
+        per feature, same row count/order as `self.df`.
+
+        `pl.rolling_corr` always outputs Float64, even for Float32 inputs;
+        cast back down immediately so this wide, one-row-per-input-row frame
+        (e.g. ~228 columns for tests2 in featuretest.py) doesn't silently
+        double its memory footprint.
+        """
+        def rolling_corr(feature: str) -> pl.Expr:
+            expr = pl.rolling_corr(pl.col(feature), pl.col(self.target), window_size=window_size)
+            if self.group_by is not None:
+                expr = expr.over(self.group_by)
+            return expr.cast(pl.Float32).alias(feature)
+
+        return self.df.select([rolling_corr(feature) for feature in self.features])
 
     def rolling_correlation(self, window_size: int = ROLLING_WINDOW) -> pl.DataFrame:
         """Computes the rolling correlation of each feature with the target.
@@ -102,13 +141,7 @@ class FeatureAnalysis:
                 "combined_rank", sorted by "combined_rank" ascending. Features
                 with an undefined mean or std, e.g. constant columns, are dropped.
         """
-        def rolling_corr(feature: str) -> pl.Expr:
-            expr = pl.rolling_corr(pl.col(feature), pl.col(self.target), window_size=window_size)
-            if self.group_by is not None:
-                expr = expr.over(self.group_by)
-            return expr.alias(feature)
-
-        rolling = self.df.select([rolling_corr(feature) for feature in self.features])
+        rolling = self._rolling_corr_frame(window_size)
 
         means = rolling.select([pl.col(feature).mean() for feature in self.features]).row(0)
         stds = rolling.select([pl.col(feature).std() for feature in self.features]).row(0)

@@ -6,7 +6,7 @@ from janestreet.pipeline import FullPipeline, PipelineCV
 from janestreet.models.nn import NN
 from janestreet.tracker import WandbTracker
 from janestreet.transformers import PolarsTransformer
-from janestreet.feature_testing import build_tests1_processor, build_tests2_processor
+from janestreet.feature_testing import build_tests1_processor, build_tests2_processor, build_tests3_processor
 
 TRACK = True
 COMMENT = ""
@@ -72,6 +72,18 @@ tests2 = {
     9: "mutual_information",
 }
 
+# lagged-feature pool (see build_tests3_processor): merges the existing
+# rolling/market-average pool's ranking with a freshly-ranked pool of lagged
+# features (7/14/28/56 time steps back, including the lagged target), without
+# ever holding both pools fully in memory at once. Two independent
+# experiments, one per metric - no fused cross-metric score. Not yet in the
+# active SIM range below (same as tests1's SIMs 0-4) - extend `range(6, 10)`
+# to `range(6, 12)` to actually run these.
+tests3 = {
+    10: "information_trans",
+    11: "mutual_information",
+}
+
 for SIM in range(6, 10):
     if SIM < 5:
         prefix = "develop16"
@@ -81,10 +93,18 @@ for SIM in range(6, 10):
             name=f"{MODEL_TYPE}_{prefix}.{SIM}_{START}",
             skip_days=START,
         )
-    else:
+    elif SIM < 10:
         prefix = "keep125"
         method = tests2[SIM]
         data_processor, df = build_tests2_processor(
+            method,
+            name=f"{MODEL_TYPE}_{prefix}.{SIM}_{START}",
+            skip_days=START,
+        )
+    else:
+        prefix = "lagged125"
+        method = tests3[SIM]
+        data_processor, df = build_tests3_processor(
             method,
             name=f"{MODEL_TYPE}_{prefix}.{SIM}_{START}",
             skip_days=START,
