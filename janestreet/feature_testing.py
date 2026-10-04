@@ -199,8 +199,8 @@ def _build_lag_pool(
         skip_days (int): Passed through to the scratch `DataProcessor`. Must
             match the `skip_days` used for pool A, so both pools have the
             same row count/order and can be combined by position.
-        target (str, optional): Target column to rank against, also lagged
-            as a candidate. Defaults to `COL_TARGET`.
+        target (str, optional): Target column to rank against. It is not itself
+            lagged (see below). Defaults to `COL_TARGET`.
         n_select (int, optional): Number of top-ranked columns to keep.
             Defaults to 125.
 
@@ -209,7 +209,10 @@ def _build_lag_pool(
             ranking (small - just the score columns, best-first), and the
             survivor set's actual column data (top-n columns + target).
     """
-    lag_cols = CANDIDATE_FEATURES_INIT + [target]
+    # The target is deliberately NOT lagged: responders are only available a full day late at
+    # inference, but a 7/14-row lag of responder_6 reaches back within the same day. That
+    # leaks (weighted corr 0.60 / R2 0.36 at lag 7), whereas a legitimate >=1-day lag has ~0.
+    lag_cols = list(CANDIDATE_FEATURES_INIT)
     dp = DataProcessor(
         "pool_b_scratch", skip_days=skip_days, cols_features_corr=[], cols_lags=lag_cols,
     )
@@ -435,7 +438,7 @@ def build_tests3_processor(
     Note:
         For ranking/training experiments only - not submission-ready when
         `.features` ends up including any lagged column (likely, given
-        lagged target/features tend to rank well). This `DataProcessor`'s
+        lagged raw features tend to rank well). This `DataProcessor`'s
         `cols_lags` is unset, and lagged features aren't computable at
         single-row inference time regardless (see `_get_lags`), so
         `process_test_data` raises rather than silently producing a model

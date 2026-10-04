@@ -74,7 +74,7 @@ tests2 = {
 
 # lagged-feature pool (see build_tests3_processor): merges the existing
 # rolling/market-average pool's ranking with a freshly-ranked pool of lagged
-# features (7/14/28/56 time steps back, including the lagged target), without
+# features (7/14/28/56 time steps back; the target is NOT lagged - it leaks), without
 # ever holding both pools fully in memory at once. Two independent
 # experiments, one per metric - no fused cross-metric score. Not yet in the
 # active SIM range below (same as tests1's SIMs 0-4) - extend `range(6, 10)`

@@ -36,6 +36,18 @@ TEST_SIZE = 200
 GAP = 0
 
 
+def _feature_matrix(df: pl.DataFrame, features: list[str]) -> np.ndarray:
+    """Returns the `features` columns of `df` as a float32 matrix.
+
+    PolarsTransformer scales `feature_time_id` (Int16) into a Float64 column. Selecting it
+    together with the Float32 features makes `to_numpy()` upcast the whole matrix to float64,
+    doubling its size (44 GB instead of 22 GB for a fold-1 training set). Casting every column
+    to Float32 first keeps it float32; it is a no-op for the columns that already are, and the
+    network converts its input to float32 anyway, so the values it sees are unchanged.
+    """
+    return df.select([pl.col(c).cast(pl.Float32) for c in features]).to_numpy()
+
+
 class FullPipeline:
     """Custom pipeline for model management and time series training.
 
@@ -137,11 +149,11 @@ class FullPipeline:
                 df = self.preprocessor.fit_transform(df)
                 df_valid = self.preprocessor.transform(df_valid)
 
-            X_train = df.select(self.features).to_numpy()
+            X_train = _feature_matrix(df, self.features)
             resp_train = df.select(self.responders).to_numpy()
             y_train = df.select(self.col_target).to_series().to_numpy()
 
-            X_valid = df_valid.select(self.features).to_numpy()
+            X_valid = _feature_matrix(df_valid, self.features)
             resp_valid = df_valid.select(self.responders).to_numpy()
             y_valid = df_valid.select(self.col_target).to_series().to_numpy()
 
@@ -165,7 +177,10 @@ class FullPipeline:
                       f"max|X_train|={np.nanmax(np.abs(X_train)):.3g}, "
                       f"max|X_valid|={np.nanmax(np.abs(X_valid)):.3g}")
 
-            train_set = (
+            # Lists, not tuples: NN.fit empties them once its datasets are built, so the numpy
+            # matrices (X is by far the largest object of the fold) are freed before training
+            # instead of being kept alive through every epoch.
+            train_set = [
                 X_train,
                 resp_train,
                 y_train,
@@ -173,8 +188,8 @@ class FullPipeline:
                 stocks_train,
                 dates_train,
                 times_train
-            )
-            val_set = (
+            ]
+            val_set = [
                 X_valid,
                 resp_valid,
                 y_valid,
@@ -182,9 +197,10 @@ class FullPipeline:
                 stocks_valid,
                 dates_valid,
                 times_valid
-            )
+            ]
 
-            del df, df_valid
+            # train_set / val_set must hold the only references to the X matrices from here on.
+            del df, df_valid, X_train, X_valid
             gc.collect()
 
             self.model.fit(train_set, val_set, verbose)

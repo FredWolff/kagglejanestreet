@@ -444,9 +444,17 @@ class NN:
         """Fit the model on the training set and validate on the validation set.
 
         Args:
-            train_set (tuple): A tuple containing input data, targets, and weights for training.
-            val_set (tuple): A tuple containing input data, targets, and weights for validation.
+            train_set (tuple | list): Input data, targets, and weights for training. If a list,
+                it is emptied once the datasets are built (see below).
+            val_set (tuple | list): Input data, targets, and weights for validation. If a list,
+                it is emptied once the datasets are built (see below).
             verbose (bool, optional): If True, prints training progress. Defaults to False.
+
+        Note:
+            The datasets keep their own float32 copies of the data, so the numpy arrays passed
+            in are not needed during training. A caller that passes lists and drops its own
+            references to the arrays lets them be freed here, rather than staying in memory for
+            every epoch. Tuples are left untouched.
         """
         torch.manual_seed(self.random_seed)
 
@@ -465,6 +473,10 @@ class NN:
             shuffle=False,
             collate_fn=flatten_collate_fn
         )
+
+        for data in (train_set, val_set):
+            if isinstance(data, list):
+                data.clear()
 
         self.model = ModelR(
             train_dataset.num_features,

@@ -14,6 +14,7 @@ from sklearn.utils import check_array as _sklearn_check_array
 
 from .config import PATH_FEATURE_SETS
 from .transformers import PolarsTransformer
+from .utils import rolling_min_periods
 
 
 class FeatureAnalysis:
@@ -213,8 +214,10 @@ class FeatureAnalysis:
         )
 
         def rolling_exprs(col: str) -> list[pl.Expr]:
-            mean_expr = pl.col(col).rolling_mean(window_size=window_size)
-            std_expr = pl.col(col).rolling_std(window_size=window_size)
+            # Same null handling as DataProcessor._get_window_average_std.
+            min_periods = rolling_min_periods(window_size)
+            mean_expr = pl.col(col).rolling_mean(window_size=window_size, min_periods=min_periods)
+            std_expr = pl.col(col).rolling_std(window_size=window_size, min_periods=min_periods)
             if self.group_by is not None:
                 mean_expr = mean_expr.over(self.group_by)
                 std_expr = std_expr.over(self.group_by)

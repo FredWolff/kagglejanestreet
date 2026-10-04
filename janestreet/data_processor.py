@@ -269,12 +269,16 @@ class DataProcessor:
             pl.DataFrame: DataFrame with rolling averages and standard deviations.
         """
         if not fast:
+            # Nulls inside a window are skipped rather than nulling the whole window - see
+            # utils.rolling_min_periods. This also matches the fast path below, whose
+            # mean()/std() ignore nulls.
+            min_periods = utils.rolling_min_periods(n)
             df = df.with_columns([
-                pl.col(col).rolling_mean(window_size=n)
+                pl.col(col).rolling_mean(window_size=n, min_periods=min_periods)
                 .over(["symbol_id"]).alias(f"{col}_rolling_avg_{n}")
                 for col in cols
             ] + [
-                pl.col(col).rolling_std(window_size=n)
+                pl.col(col).rolling_std(window_size=n, min_periods=min_periods)
                 .over(["symbol_id"]).alias(f"{col}_rolling_std_{n}")
                 for col in cols
             ])

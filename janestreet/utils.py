@@ -63,3 +63,23 @@ def create_folder(path: str, rm: bool = False) -> None:
         if os.path.exists(path):
             shutil.rmtree(path)
     os.makedirs(path, exist_ok=True)
+
+
+def rolling_min_periods(window_size: int) -> int:
+    """`min_periods` for rolling mean/std over a window that may contain nulls.
+
+    polars' default (`min_periods == window_size`) turns a window into null if it holds even
+    one null. Many raw features are structurally null for the first K time_ids of every day
+    (K up to 68, see `DataProcessor`), and a 1000-row window spans about a day, so with the
+    default their rolling columns come out ~100% null. A lower `min_periods` makes polars
+    skip the nulls and compute over the valid values left in the window. Half the window is
+    comfortably below the ~930 valid values the worst case leaves, and above the 2 needed
+    for a std.
+
+    Args:
+        window_size (int): Rolling window size, in rows.
+
+    Returns:
+        int: Minimum number of non-null values a window needs to produce a value.
+    """
+    return max(window_size // 2, 2)
