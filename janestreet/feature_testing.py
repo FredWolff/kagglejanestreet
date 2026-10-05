@@ -450,6 +450,10 @@ def build_tests3_processor(
     )
     ranking_b, survivors_b = _build_lag_pool(method, skip_days, target=target, n_select=n_select)
     survivors_a = pl.read_parquet(path_a)
+    # The checkpoint is only a memory-relief hop within this call and each SIM
+    # writes its own file (tens of GB). Leaving it behind fills the disk
+    # across SIMs ("No space left on device").
+    path_a.unlink(missing_ok=True)
 
     score_col, descending = _MERGE_SORT_KEYS[method]
     merged_ranking = (
